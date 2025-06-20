@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1 class="mb-4">Животные в приюте</h1>
+    
+    {% if current_user.is_authenticated and current_user.is_admin %}
+        <div class="mb-3">
+            <a href="{{ url_for('animals.create') }}" class="btn btn-success">Добавить животное</a>
+        </div>
+    {% endif %}
+
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for item in animals_page.items %}
+            {% set animal = item[0] %}
+            {% set adoption_count = item[1] %}
+            <div class="col">
+                <div class="card h-100">
+                    {% if animal.images %}
+                        <img src="{{ animal.images[0].url }}" class="card-img-top" alt="{{ animal.name }}">
+                    {% else %}
+                        <img src="{{ url_for('static', filename='img/no-image.png') }}" class="card-img-top" alt="Нет изображения">
+                    {% endif %}
+                    <div class="card-body">
+                        <h5 class="card-title">{{ animal.name }}</h5>
+                        <p class="card-text">
+                            <strong>Порода:</strong> {{ animal.breed }}<br>
+                            <strong>Возраст:</strong> {{ animal.age_months }} мес.<br>
+                            <strong>Пол:</strong> {{ animal.gender }}<br>
+                            <strong>Статус:</strong> {{ animal.status.value }}<br>
+                            <strong>Заявок:</strong> {{ adoption_count }}
+                        </p>
+                    </div>
+                    <div class="card-footer">
+                        <a href="{{ url_for('animals.show', animal_id=animal.id) }}" class="btn btn-sm btn-primary">Просмотр</a>
+                        {% if current_user.is_authenticated and (current_user.is_admin or current_user.is_moderator) %}
+                            <a href="{{ url_for('animals.edit', animal_id=animal.id) }}" class="btn btn-sm btn-warning">Редактировать</a>
+                        {% endif %}
+                        {% if current_user.is_authenticated and current_user.is_admin %}
+                            <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ animal.id }}">Удалить</button>
+                            
+                            <!-- Модальное окно удаления -->
+                            <div class="modal fade" id="deleteModal{{ animal.id }}" tabindex="-1">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Удаление животного</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            Вы уверены, что хотите удалить животное {{ animal.name }}?
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Нет</button>
+                                            <form action="{{ url_for('animals.delete', animal_id=animal.id) }}" method="POST">
+                                                <button type="submit" class="btn btn-danger">Да</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <nav class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if animals_page.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.index', page=animals_page.prev_num) }}">Назад</a>
+                </li>
+            {% endif %}
+            
+            {% for page_num in animals_page.iter_pages() %}
+                {% if page_num %}
+                    <li class="page-item {% if page_num == animals_page.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.index', page=page_num) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if animals_page.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('main.index', page=animals_page.next_num) }}">Вперед</a>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+{% endblock %}

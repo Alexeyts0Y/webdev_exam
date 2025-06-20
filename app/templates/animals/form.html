@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+<script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<h1>{% if animal %}Редактирование{% else %}Добавление{% endif %} животного</h1>
+
+<form method="POST" enctype="multipart/form-data">
+    <div class="mb-3">
+        <label for="name" class="form-label">Имя</label>
+        <input type="text" class="form-control" id="name" name="name" 
+               value="{{ animal.name if animal }}" required>
+    </div>
+    
+    <div class="mb-3">
+        <label for="breed" class="form-label">Порода</label>
+        <input type="text" class="form-control" id="breed" name="breed" 
+               value="{{ animal.breed if animal }}" required>
+    </div>
+    
+    <div class="mb-3">
+        <label for="age_months" class="form-label">Возраст (месяцев)</label>
+        <input type="number" class="form-control" id="age_months" name="age_months" 
+               value="{{ animal.age_months if animal }}" required min="1">
+    </div>
+    
+    <div class="mb-3">
+        <label for="gender" class="form-label">Пол</label>
+        <select class="form-select" id="gender" name="gender" required>
+            <option value="male" {% if animal and animal.gender == 'male' %}selected{% endif %}>Самец</option>
+            <option value="female" {% if animal and animal.gender == 'female' %}selected{% endif %}>Самка</option>
+        </select>
+    </div>
+    
+    {% if animal %}
+    <div class="mb-3">
+        <label for="status" class="form-label">Статус</label>
+        <select class="form-select" id="status" name="status" required>
+            {% for status in ['available', 'adoption', 'adopted'] %}
+            <option value="{{ status }}" 
+                    {% if animal and animal.status.value == status %}selected{% endif %}>
+                {{ status }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+    
+    <div class="mb-3">
+        <label for="description" class="form-label">Описание</label>
+        <textarea class="form-control" id="description" name="description" rows="5" required>
+            {{- animal.description if animal -}}
+        </textarea>
+    </div>
+    
+    {% if not animal %}
+    <div class="mb-3">
+        <label for="images" class="form-label">Фотографии</label>
+        <input type="file" class="form-control" id="images" name="images" multiple 
+               accept="image/png, image/jpeg, image/gif">
+    </div>
+    {% endif %}
+    
+    <button type="submit" class="btn btn-primary">Сохранить</button>
+    <a href="{{ url_for('main.index') }}" class="btn btn-secondary">Отмена</a>
+</form>
+
+{% block scripts %}
+<script>
+    const easyMDE = new EasyMDE({
+        element: document.getElementById('description'),
+        spellChecker: false,
+        toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 
+                 'ordered-list', '|', 'link', 'image', '|', 'preview']
+    });
+</script>
+{% endblock %}
+{% endblock %}

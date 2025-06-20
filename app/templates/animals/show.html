@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        {% if animal.images %}
+        <img src="{{ animal.images[0].url }}" class="img-fluid rounded" alt="{{ animal.name }}">
+        {% else %}
+        <img src="{{ url_for('static', filename='img/no-image.png') }}" class="img-fluid rounded">
+        {% endif %}
+    </div>
+    <div class="col-md-6">
+        <h1>{{ animal.name }}</h1>
+        <p><strong>Порода:</strong> {{ animal.breed }}</p>
+        <p><strong>Возраст:</strong> {{ animal.age_months }} мес.</p>
+        <p><strong>Пол:</strong> {{ animal.gender }}</p>
+        <p><strong>Статус:</strong> {{ animal.status.value }}</p>
+        <p><strong>Дата поступления:</strong> {{ animal.created_at.strftime('%d.%m.%Y') }}</p>
+        
+        <h3 class="mt-4">Описание</h3>
+        <div class="markdown-content">
+            {{ animal.description|markdown }}
+        </div>
+        
+        {% if current_user.is_authenticated and not user_adoption and animal.status == AnimalStatus.AVAILABLE %}
+        <button class="btn btn-primary mt-3" data-bs-toggle="modal" data-bs-target="#adoptionModal">
+            Подать заявку
+        </button>
+        
+        <div class="modal fade" id="adoptionModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Заявка на усыновление</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form method="POST" action="{{ url_for('animals.create_adoption', animal_id=animal.id) }}">
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Контактная информация</label>
+                                <textarea name="contact_info" class="form-control" required></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                            <button type="submit" class="btn btn-primary">Отправить</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% elif current_user.is_authenticated and user_adoption %}
+        <div class="alert alert-info mt-3">
+            <h4>Ваша заявка</h4>
+            <p>Статус: {{ user_adoption.status.value }}</p>
+            <p>Дата: {{ user_adoption.application_date.strftime('%d.%m.%Y') }}</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if current_user.is_authenticated and (current_user.is_admin or current_user.is_moderator) %}
+<div class="mt-5">
+    <h3>Заявки на усыновление</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Пользователь</th>
+                <th>Дата</th>
+                <th>Контактная информация</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for adoption in adoptions %}
+            <tr>
+                <td>{{ adoption.user.last_name }} {{ adoption.user.first_name }}</td>
+                <td>{{ adoption.application_date.strftime('%d.%m.%Y') }}</td>
+                <td>{{ adoption.contact_info }}</td>
+                <td>{{ adoption.status.value }}</td>
+                <td>
+                    {% if adoption.status == AdoptionStatus.PENDING %}
+                    <form method="POST" action="{{ url_for('animals.process_adoption', adoption_id=adoption.id, action='accept') }}" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-success">Принять</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('animals.process_adoption', adoption_id=adoption.id, action='reject') }}" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Отклонить</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
