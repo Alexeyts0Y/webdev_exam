@@ -8,15 +8,17 @@ import uuid
 import bleach
 from markdown import markdown
 
-from .models import db, Animal, Image, Adoption, AnimalStatus, AdoptionStatus
+from .models import Animal, Image, Adoption, AnimalStatus, AdoptionStatus, db
 from .repositories.animal_repository import AnimalRepository
 from .repositories.image_repository import ImageRepository
+from .repositories.adoption_repository import AdoptionRepository
 from .auth import check_rights
 
 bp = Blueprint('animals', __name__, url_prefix='/animals')
 
 animal_repo = AnimalRepository(db)
 image_repo = ImageRepository(db)
+adoption_repo = AdoptionRepository(db)
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -36,11 +38,7 @@ def clean_markdown(content):
     }
     
     html = markdown(content)
-    cleaned = bleach.clean(
-        html, 
-        tags=allowed_tags, 
-        attributes=allowed_attributes
-    )
+    cleaned = bleach.clean(html, tags=allowed_tags, attributes=allowed_attributes)
     return cleaned
 
 @bp.route('/')
@@ -58,18 +56,11 @@ def show(animal_id):
     
     user_adoption = None
     if current_user.is_authenticated:
-        user_adoption = db.session.execute(
-            db.select(Adoption)
-            .filter_by(user_id=current_user.id, animal_id=animal_id)
-        ).scalar()
+        user_adoption = adoption_repo.get_user_adoption(current_user.id, animal_id)
     
     adoptions = []
     if current_user.is_authenticated and (current_user.is_admin or current_user.is_moderator):
-        adoptions = db.session.execute(
-            db.select(Adoption)
-            .filter_by(animal_id=animal_id)
-            .order_by(Adoption.application_date.desc())
-        ).scalars()
+        adoptions = adoption_repo.get_animal_adoptions(animal_id)
     
     return render_template('animals/show.html', 
                          animal=animal,
@@ -86,17 +77,14 @@ def create():
         try:
             description = clean_markdown(request.form['description'])
             
-            animal = Animal(
+            animal = animal_repo.create_animal(
                 name=request.form['name'],
                 description=description,
                 age_months=int(request.form['age_months']),
                 breed=request.form['breed'],
                 gender=request.form['gender'],
-                status=AnimalStatus.AVAILABLE,
-                created_at=datetime.now()
+                status=AnimalStatus.AVAILABLE
             )
-            db.session.add(animal)
-            db.session.flush()
 
             if 'images' in request.files:
                 os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -104,7 +92,7 @@ def create():
                 for file in request.files.getlist('images'):
                     if file and file.filename and allowed_file(file.filename):
                         try:
-                            image = image_repo.add_image(file, animal.id)
+                            image_repo.add_image(file, animal.id)
                         except ValueError as e:
                             current_app.logger.error(f"Validation error: {e}")
                             flash(f'Ошибка при загрузке изображения: {e}', 'danger')
@@ -112,12 +100,10 @@ def create():
                             current_app.logger.error(f"Error saving image: {e}")
                             flash('Ошибка при сохранении изображения', 'danger')
             
-            db.session.commit()
             flash('Животное успешно добавлено', 'success')
             return redirect(url_for('animals.show', animal_id=animal.id))
             
         except Exception as e:
-            db.session.rollback()
             current_app.logger.error(f"Error creating animal: {e}")
             flash('При сохранении данных возникла ошибка. Проверьте корректность введённых данных.', 'danger')
     
@@ -134,18 +120,19 @@ def edit(animal_id):
     
     if request.method == 'POST':
         try:
-            animal.name = request.form['name']
-            animal.description = clean_markdown(request.form['description'])
-            animal.age_months = int(request.form['age_months'])
-            animal.breed = request.form['breed']
-            animal.gender = request.form['gender']
-            animal.status = AnimalStatus(request.form['status'])
+            animal_repo.update_animal(
+                animal,
+                name=request.form['name'],
+                description=clean_markdown(request.form['description']),
+                age_months=int(request.form['age_months']),
+                breed=request.form['breed'],
+                gender=request.form['gender'],
+                status=AnimalStatus(request.form['status'])
+            )
             
-            db.session.commit()
             flash('Данные обновлены', 'success')
             return redirect(url_for('animals.show', animal_id=animal.id))
         except Exception as e:
-            db.session.rollback()
             current_app.logger.error(f"Error updating animal: {e}")
             flash('При сохранении данных возникла ошибка', 'danger')
     
@@ -155,26 +142,10 @@ def edit(animal_id):
 @login_required
 @check_rights('delete_animal')
 def delete(animal_id):
-    animal = animal_repo.get_animal_by_id(animal_id)
-    if not animal:
-        flash('Животное не найдено', 'danger')
-        return redirect(url_for('animals.index'))
-    
     try:
-        for image in animal.images:
-            try:
-                filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], image.storage_filename)
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except Exception as e:
-                current_app.logger.error(f"Error deleting image file: {e}")
-                continue
-        
-        db.session.delete(animal)
-        db.session.commit()
+        animal_repo.delete_animal(animal_id)
         flash('Животное успешно удалено', 'success')
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Error deleting animal: {e}")
         flash('Ошибка при удалении животного', 'danger')
     
@@ -192,31 +163,20 @@ def create_adoption(animal_id):
         flash('Это животное уже не доступно для усыновления', 'warning')
         return redirect(url_for('animals.show', animal_id=animal_id))
     
-    existing_adoption = db.session.execute(
-        db.select(Adoption)
-        .filter_by(user_id=current_user.id, animal_id=animal_id)
-    ).scalar()
-    
-    if existing_adoption:
+    if adoption_repo.has_user_adoption(current_user.id, animal_id):
         flash('Вы уже подавали заявку на это животное', 'warning')
         return redirect(url_for('animals.show', animal_id=animal_id))
     
     try:
-        adoption = Adoption(
+        adoption_repo.create_adoption(
             user_id=current_user.id,
             animal_id=animal_id,
-            contact_info=request.form['contact_info'],
-            status=AdoptionStatus.PENDING,
-            application_date=datetime.now()
+            contact_info=request.form['contact_info']
         )
-        db.session.add(adoption)
         
-        animal.status = AnimalStatus.ADOPTION
-        
-        db.session.commit()
+        animal_repo.update_animal_status(animal_id, AnimalStatus.ADOPTION)
         flash('Заявка подана успешно', 'success')
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Error creating adoption: {e}")
         flash('Ошибка при подаче заявки', 'danger')
     
@@ -226,80 +186,20 @@ def create_adoption(animal_id):
 @login_required
 @check_rights('process_adoption')
 def process_adoption(adoption_id, action):
-    adoption = db.session.get(Adoption, adoption_id)
+    adoption = adoption_repo.get_adoption(adoption_id)
     if not adoption:
         flash('Заявка не найдена', 'danger')
         return redirect(url_for('animals.index'))
     
     try:
         if action == 'accept':
-            adoption.status = AdoptionStatus.ACCEPTED
-            adoption.animal.status = AnimalStatus.ADOPTED
-
-            db.session.execute(
-                db.update(Adoption)
-                .where(
-                    Adoption.animal_id == adoption.animal_id,
-                    Adoption.id != adoption.id,
-                    Adoption.status == AdoptionStatus.PENDING
-                )
-                .values(status=AdoptionStatus.REJECTED_ADOPTED)
-            )
-            
+            adoption_repo.accept_adoption(adoption_id)
             flash('Заявка принята. Остальные заявки на это животное отклонены.', 'success')
         elif action == 'reject':
-            adoption.status = AdoptionStatus.REJECTED
-
-            has_pending = db.session.execute(
-                db.select(Adoption)
-                .where(
-                    Adoption.animal_id == adoption.animal_id,
-                    Adoption.status == AdoptionStatus.PENDING
-                )
-            ).scalar()
-            
-            if has_pending:
-                adoption.animal.status = AnimalStatus.ADOPTION
-            else:
-                adoption.animal.status = AnimalStatus.AVAILABLE
-            
+            adoption_repo.reject_adoption(adoption_id)
             flash('Заявка отклонена', 'info')
-        
-        db.session.commit()
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Error processing adoption: {e}")
         flash('Ошибка при обработке заявки', 'danger')
     
     return redirect(url_for('animals.show', animal_id=adoption.animal_id))
-
-def update_animal_status(animal_id):
-    animal = animal_repo.get_animal_by_id(animal_id)
-    if not animal:
-        return
-
-    accepted = db.session.execute(
-        db.select(Adoption)
-        .where(
-            Adoption.animal_id == animal_id,
-            Adoption.status == AdoptionStatus.ACCEPTED
-        )
-    ).scalar()
-    
-    if accepted:
-        animal.status = AnimalStatus.ADOPTED
-    else:
-        pending = db.session.execute(
-            db.select(Adoption)
-            .where(
-                Adoption.animal_id == animal_id,
-                Adoption.status == AdoptionStatus.PENDING
-            )
-        ).scalar()
-        
-        if pending:
-            animal.status = AnimalStatus.ADOPTION
-        else:
-            animal.status = AnimalStatus.AVAILABLE
-    
-    db.session.commit()
